@@ -1,0 +1,11 @@
+I am building a python file (variables.py) that should ask its users three things.
+
+1. stocks = What stocks would you like to invest in? 
+- The user can input one or more strings. The input could be all capital or partial. lower all of them after receiving it.
+2. btip = For each element of the stocks, user now should be able to input a number.
+3. stip = For each element of the stocks, user now should be able to input a number and what that number represents. the number could either be "sell-price", "profit", "profit-percentage".
+
+Before taking user input, do mention what each of these stip representations mean:
+"sell-price" - At what price you wish to sell your shares, 
+"profit" - How much profit you want to make from this purchase, 
+"profit-percentage" - At what percentage of profit you wish to sell your shares.

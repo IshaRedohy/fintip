@@ -1,0 +1,15 @@
+It's not ideal to think that the user will always input correct stock or company name of that stock. Sometimes
+they might make mistakes and sometimes they might just type gibberish.
+
+Therefore, in the variables.py file, create a function named "validate_stock". The file rows are sorted
+alphabetically in "ticker" column, This function should read the "nasdaq_100_directory.csv" file in the same 
+file path. To validate user input:
+
+1. The function first should search for the stock in ticker column. Since, the column is sorted, use binary
+search to search in OlogN time. If any of the values in ticker column matches the user input then the function 
+should return true and we are good.
+2. If the input is nowhere to be found in the ticker column, look for it in the "company" column 
+(this column is not sorted)
+3. If found then the return should be same as step 1. Otherwise, ask the user to enter a valid stock.
+4. If user inputs multiple inputs, and some of them are valid while some are not, tell them which input
+is invalid and ask him to enter again with a valid input but keep the previously typed valid inputs.

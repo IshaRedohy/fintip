@@ -46,12 +46,14 @@ When adding tests, use `pytest`, name files like `test_variables.py`, and cover 
 
 ## Commit & Pull Request Guidelines
 
-This directory is not currently initialized as a Git repository, so no commit history conventions are available.
+This project is now tracked in Git on the `main` branch. Keep commits focused on one logical change.
 
-Use concise, imperative commit messages when Git is added, for example:
+Use concise, imperative commit messages, for example:
 
 ```text
 Add stock validation for user input
 ```
+
+Before committing, run `git status --short` and avoid committing generated files such as `__pycache__/`.
 
 Pull requests should include a short summary, manual test commands run, and any changes to expected input/output behavior.

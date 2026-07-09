@@ -1,6 +1,9 @@
 import csv
 from pathlib import Path
 
+from trading.order_plan import build_order_plan
+from trading.robinhood_mcp import submit_order_plan
+
 
 NASDAQ_DIRECTORY = Path(__file__).with_name("nasdaq_100_directory.csv")
 VALID_STIP_TYPES = ("sell-price", "profit", "profit-percentage")
@@ -147,10 +150,24 @@ def get_stip(stocks):
     return stip
 
 
-stocks = get_stocks()
-btip = get_btip(stocks)
-stip = get_stip(stocks)
+def collect_user_responses():
+    stocks = get_stocks()
+    btip = get_btip(stocks)
+    stip = get_stip(stocks)
 
-print("stocks =", stocks)
-print("btip =", btip)
-print("stip =", stip)
+    return {
+        "stocks": stocks,
+        "btip": btip,
+        "stip": stip,
+    }
+
+
+def main():
+    user_responses = collect_user_responses()
+    order_plan = build_order_plan(user_responses)
+
+    submit_order_plan(order_plan, dry_run=True)
+
+
+if __name__ == "__main__":
+    main()

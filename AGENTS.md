@@ -2,54 +2,90 @@
 
 ## Project Structure & Module Organization
 
-This directory contains a small Python project for collecting stock preferences, investment targets, and trade planning.
+This directory contains a small Python project for collecting stock preferences and monitoring prices near buy and sell targets. It sends notifications only and must never place trades.
 
-- `user_input.py`: interactive script that collects stock choices, buy targets, and sell target preferences.
-- `trading/`: trade planning and brokerage integration code.
-- `tests/`: focused tests for pure planning and dry-run behavior.
+- `user_input.py`: collect and validate terminal responses, then save monitoring preferences.
+- `trading/monitoring_plan.py`: normalize and validate monitoring preferences.
+- `trading/preferences.py`: load and save versioned preference and alert-state JSON files.
+- `trading/monitor.py`: perform one deterministic monitoring cycle and provide the scheduled CLI entry point.
+- `trading/notifications.py`: define the notification interface and console implementation.
+- `trading/robinhood_mcp.py`: isolate the quote-only Robinhood MCP boundary.
+- `trading/order_plan.py`: legacy order-planning code; do not use it from the monitor.
+- `tests/test_monitor.py`: focused monitoring, persistence, quote, and notification tests.
 - `nasdaq_100_directory.csv`: stock validation data used by `user_input.py`.
 - `prompts/`: plain-text requirement notes for implemented features.
 
-Place new tests under `tests/` and mirror the source module names where practical.
+Place new tests under `tests/` and mirror source module names where practical.
 
-## Trading Workflow Design
+## Monitoring Workflow Design
 
-Keep the project split into three simple responsibilities:
+Keep responsibilities separated:
 
-- `user_input.py`: collect and validate user responses from the terminal.
-- `trading/order_plan.py`: convert validated user responses into intended trade plans.
-- `trading/robinhood_mcp.py`: isolate Robinhood MCP account access and order execution.
+- `user_input.py` handles terminal input and ticker validation.
+- `trading/monitoring_plan.py` validates normalized tickers, positive target prices, budgets, and thresholds.
+- `trading/preferences.py` owns local JSON persistence.
+- `trading/robinhood_mcp.py` retrieves quotes only.
+- `trading/monitor.py` evaluates price bands and manages alert transitions.
+- `trading/notifications.py` delivers alerts without embedding provider-specific logic in the monitor.
 
-Do not add a subagent for the trading flow unless the project later needs true multi-agent review or auditing. Keep the first implementation as normal Python modules.
+Do not add a subagent for the monitoring flow unless the project later needs true multi-agent review or auditing. Keep the implementation as deterministic Python modules and a scheduled CLI command.
 
-Do not add `trading/preferences.py` unless structured preference objects, such as dataclasses, are actually needed. If it is added later, use it only for typed preference data, not terminal prompts or brokerage calls.
+The monitor must never expose or invoke account access, order planning, or order submission. The Robinhood adapter must remain quote-only. Until the real MCP server name, authentication setup, and quote-tool schema are known, raise a clear configuration error.
 
-Default Robinhood-related work to a dry-run path during development. `submit_order_plan(..., dry_run=True)` must not place live orders. Before live execution is added, print the exact proposed orders and require an explicit confirmation step.
+Proximity is symmetric around each target and is calculated as:
+
+```text
+abs(current_price - target_price) / target_price
+```
+
+Track buy and sell bands independently. Notify only when a target moves from outside to inside its configured band. Re-arm it after the price leaves. Missing or invalid quotes and notification failures must produce actionable errors without incorrectly advancing alert state.
+
+The initial notification provider is the console. Keep AWS SES, SNS, and Twilio as possible future adapters without selecting one prematurely.
+
+## Local Persistence
+
+Preferences are stored in `.fintip_preferences.json`, including a schema version and per-ticker buy target, investment budget, sell target, and threshold percentage. Alert transitions are stored in `.fintip_alert_state.json`.
+
+Both runtime files are git-ignored. Use atomic replacement when saving JSON so an interrupted write does not leave a partially written state file.
 
 ## Build, Test, and Development Commands
 
-Run the interactive script:
+Collect and save preferences interactively:
 
 ```bash
 python3 user_input.py
 ```
 
-Check Python syntax without running the prompts:
+Run a scripted preference sample. The blank final input selects the default 5% threshold:
 
 ```bash
-python3 -m py_compile user_input.py trading/order_plan.py trading/robinhood_mcp.py tests/test_order_plan.py
+printf 'AAPL\n100\n500\n200\n\n' | python3 user_input.py
 ```
 
-Run the current test assertions without `pytest`:
+Run one monitoring cycle:
 
 ```bash
-python3 -c 'import tests.test_order_plan as t; t.test_build_order_plan_from_user_responses(); t.test_format_order_plan(); t.test_submit_order_plan_dry_run_does_not_submit(); print("order plan tests passed")'
+python3 -m trading.monitor
 ```
 
-Run a manual dry-run sample:
+Until the Robinhood quote MCP is configured, this command should exit with a clear configuration error and must not change alert state or attempt a trade.
+
+Check Python syntax without running prompts:
 
 ```bash
-printf 'AAPL\n100\n10\nc\n' | python3 user_input.py
+python3 -m py_compile user_input.py trading/monitoring_plan.py trading/preferences.py trading/notifications.py trading/monitor.py trading/robinhood_mcp.py tests/test_monitor.py
+```
+
+Run current assertions without `pytest`:
+
+```bash
+python3 -c 'import tempfile; from pathlib import Path; import tests.test_monitor as t; t.test_build_monitoring_plan_validates_and_normalizes(); t.test_band_edges_independence_and_transition_rearming(); t.test_missing_quote_and_notification_failure_preserve_target_state(); t.test_multiple_tickers_continue_after_partial_quote_failure(); t.test_json_round_trips(Path(tempfile.mkdtemp())); t.test_quote_boundary_and_malformed_responses(); t.test_console_notification_formatting(); print("monitor tests passed")'
+```
+
+If `pytest` is available:
+
+```bash
+python3 -m pytest -q
 ```
 
 List repository files:
@@ -62,28 +98,38 @@ There is no package build step at this stage.
 
 ## Coding Style & Naming Conventions
 
-Use standard Python style with 4-space indentation. Prefer descriptive snake_case names for functions and variables, such as `validate_stock`, `get_stip_type`, and `read_nasdaq_directory`.
+Use standard Python style with 4-space indentation. Prefer descriptive snake_case names such as `validate_stock`, `build_monitoring_plan`, and `run_monitoring_cycle`.
 
-Use import-friendly Python filenames with underscores, such as `user_input.py`, instead of hyphens.
+Use import-friendly filenames with underscores. Keep terminal prompts and error messages short and actionable. Normalize ticker symbols to uppercase at module boundaries and use positive numeric values for prices, budgets, and thresholds.
 
-Keep user prompts short and clear. Normalize user input with `.strip().lower()` where comparisons should be case-insensitive. Use Python's `csv` module for CSV parsing instead of manual string splitting.
+Use Python's `csv` module for CSV parsing and `json` for persistence. Keep core monitoring calculations pure and inject quote clients and notifiers so tests never require network or brokerage access.
 
 ## Testing Guidelines
 
-There is no testing framework dependency installed yet. For now, verify changes with `py_compile`, the direct assertion command above, and manual sample runs.
+There is no required testing framework dependency. Verify changes with `py_compile`, direct assertions, and manual runs with a fake quote client before connecting a real MCP server.
 
-When adding tests, write pytest-compatible functions named like `test_order_plan.py` or `test_user_input.py`. Cover validation behavior for ticker matches, company-name matches, invalid inputs, shorthand `stip` values, order-plan formatting, and dry-run submission behavior.
+Write pytest-compatible functions named like `test_monitor.py` or `test_user_input.py`. Cover:
+
+- Empty, unsupported, and normalized ticker inputs.
+- Non-positive and malformed target prices, budgets, and thresholds.
+- Prices outside, exactly on, and inside both sides of a proximity band.
+- Independent buy-target and sell-target evaluation.
+- One alert on entry, suppression while inside, and re-alerting after exit and re-entry.
+- Preference and alert-state JSON round trips.
+- Multiple tickers, missing quotes, partial failures, and malformed MCP responses.
+- Notification formatting and failure behavior.
+- The absence of order submission from every monitoring path.
 
 ## Commit & Pull Request Guidelines
 
-This project is now tracked in Git on the `main` branch. Keep commits focused on one logical change.
+This project is tracked in Git on the `main` branch. Keep commits focused on one logical change.
 
 Use concise, imperative commit messages, for example:
 
 ```text
-Add stock validation for user input
+Add price target notification monitor
 ```
 
-Before committing, run `git status --short` and avoid committing generated files such as `__pycache__/`.
+Before committing, run `git status --short` and avoid committing generated files such as `__pycache__/`, `.fintip_preferences.json`, or `.fintip_alert_state.json`.
 
-Pull requests should include a short summary, manual test commands run, and any changes to expected input/output behavior.
+Pull requests should include a short summary, test commands run, changes to expected input/output behavior, and any remaining Robinhood MCP configuration requirements.

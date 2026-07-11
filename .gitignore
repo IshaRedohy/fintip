@@ -1,2 +1,4 @@
 prompts/
 __pycache__/
+.fintip_preferences.json
+.fintip_alert_state.json

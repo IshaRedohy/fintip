@@ -1,20 +1,11 @@
 import csv
 from pathlib import Path
 
-from trading.order_plan import build_order_plan
-from trading.robinhood_mcp import submit_order_plan
+from trading.monitoring_plan import build_monitoring_plan
+from trading.preferences import DEFAULT_PREFERENCES_PATH, save_preferences
 
 
 NASDAQ_DIRECTORY = Path(__file__).with_name("nasdaq_100_directory.csv")
-VALID_STIP_TYPES = ("sell-price", "profit", "profit-percentage")
-STIP_TYPE_OPTIONS = {
-    "a": "sell-price",
-    "b": "profit",
-    "c": "profit-percentage",
-    "sell-price": "sell-price",
-    "profit": "profit",
-    "profit-percentage": "profit-percentage",
-}
 
 
 def read_nasdaq_directory():
@@ -22,151 +13,76 @@ def read_nasdaq_directory():
         return list(csv.DictReader(csv_file))
 
 
-def ticker_exists(rows, stock):
+def find_ticker(rows, stock):
     target = stock.strip().lower()
-    left = 0
-    right = len(rows) - 1
-
-    while left <= right:
-        middle = (left + right) // 2
-        ticker = rows[middle]["ticker"].strip().lower()
-
-        if ticker == target:
-            return True
-        if ticker < target:
-            left = middle + 1
-        else:
-            right = middle - 1
-
-    return False
+    for row in rows:
+        if row["ticker"].strip().lower() == target:
+            return row["ticker"].strip().upper()
+        if row["company"].strip().lower() == target:
+            return row["ticker"].strip().upper()
+    return None
 
 
 def validate_stock(stock):
-    rows = read_nasdaq_directory()
-
-    if ticker_exists(rows, stock):
-        return True
-
-    target = stock.strip().lower()
-    for row in rows:
-        if row["company"].strip().lower() == target:
-            return True
-
-    return False
+    return find_ticker(read_nasdaq_directory(), stock) is not None
 
 
 def parse_stock_input(stock_input):
     if "," in stock_input:
         return [stock.strip() for stock in stock_input.split(",") if stock.strip()]
-
     stock_input = stock_input.strip()
     if validate_stock(stock_input):
         return [stock_input]
-
     return [stock.strip() for stock in stock_input.split() if stock.strip()]
 
 
 def get_stocks():
-    stocks = []
-
+    rows = read_nasdaq_directory()
     while True:
-        stock_input = input("What stocks would you like to invest in? ")
-        entered_stocks = parse_stock_input(stock_input)
-
-        if not entered_stocks:
-            print("Please enter at least one stock.")
-            continue
-
-        invalid_stocks = []
-
-        for stock in entered_stocks:
-            normalized_stock = stock.lower()
-
-            if validate_stock(stock):
-                if normalized_stock not in stocks:
-                    stocks.append(normalized_stock)
-            else:
-                invalid_stocks.append(stock)
-
-        if not invalid_stocks:
-            return stocks
-
-        print("Invalid stock input:", ", ".join(invalid_stocks))
-        print("Please enter a valid stock. Previously entered valid stocks were kept.")
+        entered = parse_stock_input(input("Stocks to monitor: "))
+        normalized = [find_ticker(rows, stock) for stock in entered]
+        invalid = [stock for stock, ticker in zip(entered, normalized) if ticker is None]
+        if entered and not invalid:
+            return list(dict.fromkeys(normalized))
+        print("Unsupported stock(s):", ", ".join(invalid) if invalid else "none entered")
 
 
-def get_number(prompt):
+def get_positive_number(prompt, default=None):
     while True:
-        value = input(prompt)
-
+        raw_value = input(prompt).strip()
+        if not raw_value and default is not None:
+            return float(default)
         try:
-            return float(value)
+            value = float(raw_value)
+            if value > 0:
+                return value
         except ValueError:
-            print("Please enter a valid number.")
-
-
-def get_btip(stocks):
-    btip = {}
-
-    for stock in stocks:
-        btip[stock] = get_number(f"Enter btip for {stock}: ")
-
-    return btip
-
-
-def explain_stip_types():
-    print("Before entering stip values, here is what each representation means:")
-    print('"sell-price" - At what price you wish to sell your shares')
-    print('"profit" - How much profit you want to make from this purchase')
-    print('"profit-percentage" - At what percentage of profit you wish to sell your shares')
-
-
-def get_stip_type(stock):
-    while True:
-        stip_type = input(
-            f"Enter stip representation for {stock} "
-            "(a. sell-price, b. profit, c. profit-percentage): "
-        ).strip().lower()
-
-        if stip_type in STIP_TYPE_OPTIONS:
-            return STIP_TYPE_OPTIONS[stip_type]
-
-        print("Please enter a, b, c, sell-price, profit, or profit-percentage.")
-
-
-def get_stip(stocks):
-    stip = {}
-
-    explain_stip_types()
-
-    for stock in stocks:
-        value = get_number(f"Enter stip number for {stock}: ")
-        representation = get_stip_type(stock)
-        stip[stock] = {
-            "value": value,
-            "representation": representation,
-        }
-
-    return stip
+            pass
+        print("Please enter a number greater than zero.")
 
 
 def collect_user_responses():
-    stocks = get_stocks()
-    btip = get_btip(stocks)
-    stip = get_stip(stocks)
-
-    return {
-        "stocks": stocks,
-        "btip": btip,
-        "stip": stip,
-    }
+    preferences = []
+    for ticker in get_stocks():
+        preferences.append(
+            {
+                "ticker": ticker,
+                "buy_target_price": get_positive_number(f"{ticker} buy target: $"),
+                "investment_budget": get_positive_number(f"{ticker} investment budget: $"),
+                "sell_target_price": get_positive_number(f"{ticker} sell target: $"),
+                "threshold_percent": get_positive_number(
+                    f"{ticker} alert threshold percent [5]: ", default=5
+                ),
+            }
+        )
+    return preferences
 
 
 def main():
-    user_responses = collect_user_responses()
-    order_plan = build_order_plan(user_responses)
-
-    submit_order_plan(order_plan, dry_run=True)
+    plan = build_monitoring_plan(collect_user_responses())
+    save_preferences(plan, DEFAULT_PREFERENCES_PATH)
+    print(f"Saved {len(plan)} ticker preference(s) to {DEFAULT_PREFERENCES_PATH}.")
+    print("No trades were placed.")
 
 
 if __name__ == "__main__":
